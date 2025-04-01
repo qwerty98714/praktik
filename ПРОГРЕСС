@@ -1,0 +1,512 @@
+
+import flet as ft
+import requests
+
+API_KEY = "ef6f663455eb409ca01dfa713cfe9361"
+
+def translate_text_mymemory(text, source_lang="ru", target_lang="en"):
+    """
+    Функция для перевода текста через MyMemory API.
+    """
+    url = "https://api.mymemory.translated.net/get"
+    params = {"q": text, "langpair": f"{source_lang}|{target_lang}"}
+    response = requests.get(url, params=params)
+    if response.status_code == 200:
+        return response.json()["responseData"]["translatedText"]
+    else:
+        return text
+
+def search_recipes_complex(ingredients, number=3):
+    """
+    Поиск рецептов по ингредиентам (Spoonacular API).
+    """
+    url = "https://api.spoonacular.com/recipes/complexSearch"
+    params = {
+        "apiKey": API_KEY,
+        "includeIngredients": ingredients,
+        "number": number,
+        "addRecipeInformation": "true"
+    }
+    response = requests.get(url, params=params)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        print("Ошибка при поиске рецептов:", response.status_code, response.text)
+        return None
+
+def get_recipe_details(recipe_id):
+    """
+    Получает детали рецепта (включая калории и ингредиенты).
+    """
+    url = f"https://api.spoonacular.com/recipes/{recipe_id}/information"
+    params = {
+        "apiKey": API_KEY,
+        "includeNutrition": "true"  # Важно для получения информации о калориях
+    }
+    response = requests.get(url, params=params)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        print("Ошибка при получении деталей рецепта:", response.status_code, response.text)
+        return None
+
+def show_recipe_details(page: ft.Page, recipe_id: int):
+    page.controls.clear()
+    details = get_recipe_details(recipe_id)
+    if not details:
+        page.add(ft.Text("Ошибка загрузки рецепта", color=ft.Colors.RED))
+        page.update()
+        return
+
+    # Перевод названия
+    title_en = details.get("title", "")
+    title_ru = translate_text_mymemory(title_en, "en", "ru")
+
+    # Время приготовления
+    time_minutes = details.get("readyInMinutes", 0)
+
+    # Количество порций
+    servings = details.get("servings", 1)
+
+    # Получаем калории из "nutrition" -> "nutrients"
+    calories_val = 0
+    nutrition = details.get("nutrition", {})
+    nutrients = nutrition.get("nutrients", [])
+    for n in nutrients:
+        if n.get("name", "").lower() == "calories":
+            calories_val = int(n.get("amount", 0))
+            break
+
+    # Ингредиенты
+    ingredients_controls = []
+    for ing in details.get("extendedIngredients", []):
+        original_en = ing.get("original", "")
+        original_ru = translate_text_mymemory(original_en, "en", "ru")
+        ingredients_controls.append(
+            ft.Row(
+                spacing=10,
+                controls=[
+                    ft.Icon(ft.Icons.FIBER_MANUAL_RECORD, color=ft.Colors.PINK_400, size=10),
+                    ft.Text(
+                        value=original_ru,
+                        color=ft.Colors.WHITE,
+                        font_family="Roboto",
+                        size=16
+                    ),
+                ],
+            )
+        )
+
+    # Инструкции
+    instructions_en = details.get("instructions") or ""
+    instructions_ru = translate_text_mymemory(instructions_en, "en", "ru")
+
+    instructions_lines = [line.strip() for line in instructions_ru.split("\n") if line.strip()]
+    instructions_controls = []
+    for line in instructions_lines:
+        instructions_controls.append(
+            ft.Row(
+                spacing=10,
+                controls=[
+                    ft.Icon(ft.Icons.FIBER_MANUAL_RECORD, color=ft.Colors.PINK_400, size=10),
+                    ft.Text(
+                        value=line,
+                        color=ft.Colors.WHITE,
+                        font_family="Roboto",
+                        size=16,
+                        selectable=True
+                    ),
+                ],
+            )
+        )
+
+    # Верхняя панель: название и иконка избранного
+    title_bar = ft.Row(
+        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+        controls=[
+            ft.Text(
+                title_ru,
+                size=24,
+                weight=ft.FontWeight.BOLD,
+                color=ft.Colors.WHITE,
+                font_family="Poppins"
+            ),
+            ft.IconButton(
+                icon=ft.Icons.FAVORITE_BORDER,
+                icon_color=ft.Colors.PINK_400,
+                on_click=lambda e: print("Добавлено в избранное")
+            ),
+        ],
+    )
+
+    # Блок с иконками (время, калории, порции)
+    info_bar = ft.Row(
+        spacing=20,
+        controls=[
+            ft.Row(
+                spacing=5,
+                controls=[
+                    ft.Icon(ft.Icons.TIMER_OUTLINED, color=ft.Colors.PINK_400, size=20),
+                    ft.Text(f"{time_minutes} мин", color=ft.Colors.GREY_300, size=14, font_family="Poppins"),
+                ],
+            ),
+            ft.Row(
+                spacing=5,
+                controls=[
+                    ft.Icon(ft.Icons.LOCAL_FIRE_DEPARTMENT_OUTLINED, color=ft.Colors.PINK_400, size=20),
+                    ft.Text(f"{calories_val} ккал", color=ft.Colors.GREY_300, size=14, font_family="Poppins"),
+                ],
+            ),
+            ft.Row(
+                spacing=5,
+                controls=[
+                    ft.Icon(ft.Icons.PEOPLE_ALT_OUTLINED, color=ft.Colors.PINK_400, size=20),
+                    ft.Text(f"{servings} порции", color=ft.Colors.GREY_300, size=14, font_family="Poppins"),
+                ],
+            ),
+        ],
+    )
+
+    # Кнопка «Назад»
+    back_button_bar = ft.Row(
+        [
+            ft.IconButton(
+                ft.Icons.ARROW_BACK,
+                icon_color=ft.Colors.WHITE,
+                on_click=lambda e: open_search_screen(page)
+            ),
+            ft.Container(expand=1),
+        ],
+        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+    )
+
+    # Собираем разметку в ListView (прокрутка)
+    details_view = ft.ListView(
+        expand=True,
+        padding=20,
+        spacing=20,
+        controls=[
+            back_button_bar,
+            ft.Container(
+                bgcolor="#1F1F2A",
+                border_radius=ft.border_radius.all(15),
+                padding=15,
+                content=ft.Column(
+                    spacing=15,
+                    controls=[
+                        title_bar,
+                        ft.Image(
+                            src=details.get("image"),
+                            width=page.window.width - 70,
+                            height=200,
+                            fit=ft.ImageFit.COVER,
+                            border_radius=ft.border_radius.all(10)
+                        ),
+                        info_bar,
+                        ft.Text(
+                            "Ингредиенты",
+                            size=18,
+                            weight=ft.FontWeight.BOLD,
+                            color=ft.Colors.WHITE,
+                            font_family="Poppins"
+                        ),
+                    ] + ingredients_controls + [
+                        ft.Text(
+                            "Инструкции",
+                            size=18,
+                            weight=ft.FontWeight.BOLD,
+                            color=ft.Colors.WHITE,
+                            font_family="Poppins"
+                        ),
+                    ] + instructions_controls
+                ),
+            )
+        ]
+    )
+
+    page.add(details_view)
+    page.update()
+
+def open_search_screen(page: ft.Page):
+    page.controls.clear()
+
+    # Верхняя панель с кнопкой возврата к главному экрану
+    top_bar = ft.Row(
+        [
+            ft.IconButton(
+                ft.Icons.ARROW_BACK,
+                icon_color=ft.Colors.WHITE,
+                on_click=lambda e: go_back(page)
+            ),
+            ft.Container(expand=1),
+        ],
+        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+    )
+
+    # Поле ввода ингредиентов
+    search_field = ft.TextField(
+        label="Введите ингредиенты (через запятую)",
+        autofocus=True,
+        bgcolor="#2E2F45",
+        border_radius=ft.border_radius.all(15),
+        color=ft.Colors.WHITE,
+        width=page.window.width - 40,
+    )
+
+    # Контейнер для результатов поиска
+    results_list = ft.Column(spacing=20)
+
+    def do_search(e):
+        results_list.controls.clear()
+        if not search_field.value:
+            page.update()
+            return
+
+        ingredients_ru = search_field.value
+        # Перевод ингредиентов на английский
+        ingredients_en = translate_text_mymemory(ingredients_ru, "ru", "en")
+        api_result = search_recipes_complex(ingredients_en, number=5)
+        if api_result and "results" in api_result:
+            seen_ids = set()  # Исключаем дубли
+            for recipe in api_result["results"]:
+                recipe_id = recipe.get("id")
+                if recipe_id in seen_ids:
+                    continue
+                seen_ids.add(recipe_id)
+
+                title_en = recipe.get("title", "")
+                title_ru = translate_text_mymemory(title_en, "en", "ru")
+                image_url = recipe.get("image")
+
+                card = ft.Card(
+                    width=page.window.width - 40,
+                    content=ft.Container(
+                        padding=10,
+                        border_radius=ft.border_radius.all(15),
+                        bgcolor="#1F1F2A",
+                        content=ft.Column(
+                            spacing=10,
+                            controls=[
+                                ft.Image(
+                                    src=image_url,
+                                    width=page.window.width - 60,
+                                    height=150,
+                                    fit=ft.ImageFit.COVER,
+                                    border_radius=ft.border_radius.all(10)
+                                ),
+                                ft.Text(
+                                    value=title_ru,
+                                    size=20,
+                                    weight=ft.FontWeight.BOLD,
+                                    color=ft.Colors.WHITE,
+                                    font_family="Poppins"
+                                ),
+                                ft.ElevatedButton(
+                                    text="Подробнее",
+                                    bgcolor=ft.Colors.PINK_400,
+                                    color=ft.Colors.WHITE,
+                                    on_click=lambda e, rid=recipe_id: show_recipe_details(page, rid)
+                                ),
+                            ],
+                        )
+                    ),
+                    elevation=10
+                )
+                results_list.controls.append(card)
+        else:
+            results_list.controls.append(
+                ft.Text("Рецепты не найдены", color=ft.Colors.WHITE)
+            )
+        page.update()
+
+    search_button = ft.ElevatedButton(
+        text="Найти рецепты",
+        bgcolor=ft.Colors.PINK_400,
+        color=ft.Colors.WHITE,
+        on_click=do_search,
+    )
+
+    search_view = ft.ListView(
+        expand=True,
+        padding=20,
+        spacing=20,
+        controls=[
+            top_bar,
+            search_field,
+            search_button,
+            results_list
+        ]
+    )
+
+    page.add(search_view)
+    page.update()
+
+def recipe_card(title: str, prep_time: int, calories: int, image_url: str):
+    """
+    Пример карточки на главном экране.
+    """
+    return ft.Card(
+        width=160,
+        height=250,
+        content=ft.Container(
+            bgcolor="#1F1F2A",
+            padding=10,
+            border_radius=ft.border_radius.all(15),
+            content=ft.Column(
+                spacing=3,
+                controls=[
+                    ft.Image(src=image_url, width=120, height=50),
+                    ft.Text(
+                        title,
+                        color=ft.Colors.WHITE,
+                        size=18,
+                        weight=ft.FontWeight.BOLD,
+                        font_family="Poppins"
+                    ),
+                    ft.Text(
+                        f"Время: {prep_time} мин",
+                        color=ft.Colors.GREY_300,
+                        size=14,
+                        font_family="Roboto"
+                    ),
+                    ft.Text(
+                        f"Калории: {calories}",
+                        color=ft.Colors.GREY_300,
+                        size=14,
+                        font_family="Roboto"
+                    ),
+                    ft.ElevatedButton(
+                        text="Подробнее",
+                        bgcolor=ft.Colors.PINK_400,
+                        color=ft.Colors.WHITE,
+                        height=40,
+                        style=ft.ButtonStyle(padding=5),
+                        on_click=lambda e: print(f"Подробности рецепта: {title}")
+                    ),
+                ]
+            )
+        ),
+        elevation=10
+    )
+
+def main(page: ft.Page):
+    page.controls.clear()
+    page.title = "Culinary Mastermind"
+    page.window.frameless = True
+    page.window.width = 380
+    page.window.height = 800
+    page.window.resizable = False
+
+    page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
+    page.vertical_alignment = ft.MainAxisAlignment.START
+    page.padding = 0
+    page.bgcolor = "#2C2C3E"
+
+    header_text = ft.Text(
+        value="Culinary Mastermind",
+        size=32,
+        weight=ft.FontWeight.BOLD,
+        color=ft.Colors.WHITE,
+        font_family="Poppins"
+    )
+
+    subheader_text = ft.Text(
+        value="Готовьте шедевры из того, что есть в холодильнике!",
+        size=18,
+        color=ft.Colors.GREY_300,
+        font_family="Roboto"
+    )
+
+    recipes_row = ft.Row(
+        spacing=10,
+        controls=[
+            recipe_card("Паста с томатами", prep_time=20, calories=350, image_url="https://via.placeholder.com/120x50"),
+            recipe_card("Салат с авокадо", prep_time=15, calories=250, image_url="https://via.placeholder.com/120x50"),
+            recipe_card("Суп из тыквы", prep_time=30, calories=400, image_url="https://via.placeholder.com/120x50"),
+        ],
+        scroll=ft.ScrollMode.AUTO
+    )
+
+    favorites_text = ft.Text(
+        value="Любимые рецепты",
+        size=20,
+        weight=ft.FontWeight.BOLD,
+        color=ft.Colors.WHITE,
+        font_family="Poppins"
+    )
+
+    def recipe_item(title: str):
+        return ft.Container(
+            padding=10,
+            bgcolor="#2E2F45",
+            border_radius=ft.border_radius.all(10),
+            content=ft.Row(
+                controls=[
+                    ft.Icon(ft.Icons.RESTAURANT_MENU, color=ft.Colors.PINK_400),
+                    ft.Text(
+                        title,
+                        color=ft.Colors.WHITE,
+                        size=16,
+                        font_family="Roboto"
+                    ),
+                ]
+            )
+        )
+
+    favorites_column = ft.Column(
+        spacing=10,
+        controls=[
+            recipe_item("Паста с томатами"),
+            recipe_item("Салат с авокадо"),
+            recipe_item("Суп из тыквы"),
+        ]
+    )
+
+    top_bar = ft.Row(
+        [
+            ft.IconButton(ft.Icons.MENU, icon_color=ft.Colors.WHITE),
+            ft.Container(expand=1),
+        ],
+        alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+    )
+
+    search_button_container = ft.Container(
+        content=ft.IconButton(
+            ft.Icons.SEARCH,
+            icon_size=40,
+            icon_color=ft.Colors.WHITE,
+            bgcolor=ft.Colors.PINK_400,
+            on_click=lambda e: open_search_screen(page)
+        ),
+        alignment=ft.Alignment(0, 1),
+        margin=ft.margin.only(top=20)
+    )
+
+    page.add(
+        ft.Column(
+            width=page.window.width,
+            spacing=20,
+            alignment=ft.MainAxisAlignment.START,
+            controls=[
+                top_bar,
+                header_text,
+                subheader_text,
+                recipes_row,
+                favorites_text,
+                favorites_column,
+            ]
+        ),
+        search_button_container,
+    )
+    page.update()
+
+def go_back(page: ft.Page):
+    """
+    Возвращает на главный экран, очищая все предыдущие контролы.
+    """
+    page.controls.clear()
+    main(page)
+    page.update()
+
+if __name__ == "__main__":
+    ft.app(target=main)  КАК ТЫ МОЖЕШЬ УЛУЧШИТЬ ЭТУ ПРОГРАММУ?
